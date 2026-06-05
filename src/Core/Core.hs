@@ -842,6 +842,15 @@ isTotalFun expr
       Case exps branches -> all isTotal exps && all isTotalBranchFun branches
       -- App (TypeApp (Var open _) _) args  | getName open == nameEffectOpen
       --              -> all isTotal args
+      -- A call of the form `unbox(f)` produces a function value extracted from a
+      -- runtime box. Such a value may have been stored after `unsafe-total` erased
+      -- its true effects (most importantly, a parked `resume` continuation, see
+      -- https://github.com/koka-lang/koka issues around `raw ctl` + dispatcher
+      -- patterns). Trusting the static "total" annotation here lets the simplifier
+      -- DCE a `val _ = (unbox(f))(args)` call when the unit result is unused,
+      -- silently swallowing the effects (including ctl-resumption).
+      -- Be conservative: treat such calls as effectful.
+      App (Var v _) _ | getName v == nameUnbox -> False
       App f args    -> hasTotalEffect (typeOf expr) && isTotalFun f && all isTotal args
       Var v _       | getName v == nameKeep -> False
                     | getName v `elem` [nameBox,nameUnbox]  -> True
