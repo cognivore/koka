@@ -62,6 +62,15 @@ pub fun pretend-no-ndet( action : () -> <ndet|e> a ) : e a
 // "no handler found" diagnostic). Erased thunks should be produced by coercing into a
 // _polymorphic_ effect row (e.g. a `forall<e>` `fork`-style API taking `() -> e ()`),
 // which makes the compiler attach a dynamic evidence-lookup wrapper to the value.
+//
+// Evidence-flow caveat: "installed at the call site" means present in the evidence
+// vector at the `unsafe-reopen` call, and Koka narrows the evidence vector to exactly
+// the callee's static row at every call boundary. So every function between the
+// handler installs and the `unsafe-reopen` call must let the evidence FLOW through:
+// give them an open row with a polymorphic tail (e.g. `: <exn,div|e> ()`) -- or carry
+// the needed effects explicitly -- rather than a narrow closed row, which would strip
+// the evidence before `unsafe-reopen` can rebind it (caught at runtime as "no handler
+// found for effect <...>").
 pub noinline fun unsafe-reopen( f : () -> <div> b ) : <div|e> b
   f()
 
