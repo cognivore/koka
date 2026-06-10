@@ -1,0 +1,4 @@
+fiber: enter
+handler: op
+fiber: got 42
+done

@@ -61,14 +61,19 @@ static inline kk_evv_vector_t kk_evv_as_vector( kk_evv_t evv, kk_context_t* ctx 
   return kk_datatype_as_assert(kk_evv_vector_t,evv,KK_TAG_EVV_VECTOR,ctx);
 }
 
+void kk_evv_at_fail( kk_ssize_t i, kk_context_t* ctx );  // calls kk_fatal_error; does not return
+
 static inline kk_std_core_hnd__ev_t kk_evv_at( kk_ssize_t i, kk_context_t* ctx ) {
   kk_evv_t evv = ctx->evv;
   if (!kk_evv_is_vector(evv,ctx)) {  // evv is a single evidence
-    kk_assert_internal(i==0);
+    if kk_unlikely(i != 0) { kk_evv_at_fail(i,ctx); }
     return kk_evv_as_ev(kk_evv_dup(evv,ctx),ctx);
   }
   else {  // evv as a vector
-    kk_assert_internal(i >= 0 && i < (kk_block_scan_fsize(kk_datatype_as_ptr(evv,ctx))));
+    // check the index even in release builds: an out-of-bounds index (e.g. from an
+    // effect-erasing cast invoked outside the scope of its handlers) would otherwise
+    // read garbage memory and crash (or corrupt) far away from the actual bug.
+    if kk_unlikely(i < 0 || i >= (kk_block_scan_fsize(kk_datatype_as_ptr(evv,ctx)))) { kk_evv_at_fail(i,ctx); }
     kk_evv_vector_t vec = kk_evv_as_vector(evv,ctx);
     return kk_std_core_hnd__ev_dup(vec->vec[i],ctx);
   }
