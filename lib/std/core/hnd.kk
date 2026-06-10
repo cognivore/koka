@@ -321,15 +321,28 @@ noinline fun yield-to( m : marker<e1,r>, clause : (resume-result<b,r> -> e1 r) -
     // val keep1 = guard(w0)  // check the evidence is correctly restored
     f()
 
-pub type yield-info
+// A captured yield context (finalization state). This MUST be a real
+// single-constructor struct, NOT an abstract `type yield-info` -- an abstract
+// type compiles to no-op dup/drop, but the underlying C block is refcounted and
+// is freed by `unsafe-reyield`; when the capturing closure is invoked shared
+// (inside any `kcompose`), the no-op dup leads to a double free and cumulative
+// heap corruption. Wrapping the raw box in a struct makes dup/drop real.
+// (Backport of upstream cf8711e7.)
+abstract struct yield-info( yctx : any )
 
-extern yield-capture() : e yield-info
+extern yield-capture-prim() : e any
   c "kk_yield_capture"
   js "_yield_capture"
 
-pub extern unsafe-reyield(yld : yield-info) : e a
+extern unsafe-reyield-prim(yld : any) : e a
   c "kk_yield_reyield"
   js "_reyield"
+
+fun yield-capture() : e yield-info
+  Yield-info(yield-capture-prim())
+
+pub fun unsafe-reyield(Yield-info(yctx) : yield-info) : e a
+  unsafe-reyield-prim(yctx)
 
 
 // -------------------------------------------
