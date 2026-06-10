@@ -52,7 +52,12 @@ kk_string_t kk_string_from_list(kk_std_core_types__list cs, kk_context_t* ctx) {
     p += count;
     xs = cons->tail;
   }
-  kk_assert_internal(*p == 0 && (p - kk_string_buf_borrow(s,NULL,ctx)) == len);
+  // For an empty list, kk_unsafe_string_alloc_buf(0,...) does NOT allocate: it
+  // returns the empty-bytes singleton and points `p` at a different static
+  // scratch buffer than kk_string_buf_borrow(s) yields, so the pointer
+  // difference below is meaningless (it compares two unrelated statics). Only
+  // the len>0 case allocates a real buffer where this invariant is meaningful.
+  kk_assert_internal(len == 0 || (*p == 0 && (p - kk_string_buf_borrow(s,NULL,ctx)) == len));
   kk_std_core_types__list_drop(cs,ctx);  // todo: drop while visiting?
   return s;
 }
