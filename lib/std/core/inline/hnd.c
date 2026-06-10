@@ -73,6 +73,13 @@ static kk_std_core_hnd__ev* kk_evv_as_vec(kk_evv_t evv, kk_ssize_t* len, kk_std_
 // }
 
 
+void kk_evv_at_fail( kk_ssize_t i, kk_context_t* ctx ) {
+  kk_string_t evvs = kk_evv_show(kk_evv_dup(ctx->evv,ctx),ctx);
+  kk_fatal_error(EFAULT,"invalid evidence index %ld in the current evidence vector: %s\n  (this can happen when an effectful function is invoked through an effect-erasing cast (like `unsafe-total`) outside the scope of its handlers; if the handlers ARE in scope at the call site, invoke the function through `std/core/unsafe/unsafe-reopen` instead)",
+                 (long)i, kk_string_cbuf_borrow(evvs,NULL,ctx));
+  kk_string_drop(evvs,ctx); // not reached
+}
+
 kk_ssize_t kk_evv_index( struct kk_std_core_hnd_Htag htag, kk_context_t* ctx ) {
   // todo: drop htag?
   kk_ssize_t len;
@@ -80,12 +87,20 @@ kk_ssize_t kk_evv_index( struct kk_std_core_hnd_Htag htag, kk_context_t* ctx ) {
   kk_std_core_hnd__ev* vec = kk_evv_as_vec(ctx->evv,&len,&single,ctx);
   for(kk_ssize_t i = 0; i < len; i++) {
     struct kk_std_core_hnd_Ev* ev = kk_std_core_hnd__as_Ev(vec[i],ctx);
-    if (kk_string_cmp_borrow(htag.tagname,ev->htag.tagname,ctx) <= 0) return i; // break on insertion point
+    const int cmp = kk_string_cmp_borrow(htag.tagname,ev->htag.tagname,ctx);
+    if (cmp == 0) return i;  // found (the first occurrence == the innermost handler)
+    if (cmp < 0) break;      // passed the insertion point: the tag is not present
   }
-  //string_t evvs = kk_evv_show(dup_datatype_as(kk_evv_t,ctx->evv),ctx);
-  //fatal_error(EFAULT,"cannot find tag '%s' in: %s", string_cbuf_borrow(htag.htag), string_cbuf_borrow(evvs));
-  //drop_string_t(evvs,ctx);
-  return len;
+  // Not found: fail hard with a diagnostic instead of returning the insertion point.
+  // Returning the insertion point hands the caller either an out-of-bounds index or
+  // the index of an UNRELATED effect's evidence: `open-at`/`mask` then run code
+  // against the wrong handler which corrupts memory (classic symptom: SIGSEGV on the
+  // first op of a thunk whose effects were erased via an `unsafe-total`-style cast and
+  // which is invoked where its handlers are not on the evidence vector).
+  kk_string_t evvs = kk_evv_show(kk_evv_dup(ctx->evv,ctx),ctx);
+  kk_fatal_error(EFAULT,"no handler found for effect <%s> in the current evidence vector: %s\n  (this can happen when an effectful function is invoked through an effect-erasing cast (like `unsafe-total`) outside the scope of its handlers; if the handlers ARE in scope at the call site, invoke the function through `std/core/unsafe/unsafe-reopen` instead)",
+                 kk_string_cbuf_borrow(htag.tagname,NULL,ctx), kk_string_cbuf_borrow(evvs,NULL,ctx));
+  return len; // not reached
 }
 
 
@@ -223,7 +238,9 @@ kk_evv_t kk_evv_create(kk_evv_t evv1, kk_vector_t indices, kk_context_t* ctx) {
   kk_std_core_hnd__ev* buf1 = kk_evv_as_vec(evv1,&len1,&single,ctx);
   for(kk_ssize_t i = 0; i < len; i++) {
     kk_ssize_t idx = kk_ssize_unbox(elems[i],KK_BORROWED,ctx);
-    kk_assert_internal(idx < len1);
+    // check even in release builds: an out-of-bounds index would copy garbage
+    // "evidence" into the new vector and corrupt the heap far from the real bug
+    if kk_unlikely(idx < 0 || idx >= len1) { kk_evv_at_fail(idx,ctx); }
     buf2[i] = kk_std_core_hnd__ev_dup( buf1[idx], ctx );
   }
   kk_vector_drop(indices,ctx);
