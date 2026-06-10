@@ -920,7 +920,15 @@ getDataInfo newtypes dataType
     extractDataName tp
       = case expandSyn tp of
           TForall _ t -> extractDataName t
-          TFun _ _ t -> extractDataName t
+          -- NOTE: do NOT recurse into a function type's result. A value of
+          -- function type is a closure (KK_TAG_FUNCTION block) whose size is
+          -- determined by its captured variables, never by the data shape of
+          -- its result type. Treating it as fixed-size reusable data of the
+          -- result's constructor (the old `TFun _ _ t -> extractDataName t`)
+          -- let Perceus drop-reuse a closure block to build a larger result
+          -- constructor in place, writing past the closure -> heap corruption
+          -- (e.g. a route handler `(request) -> http-response` reused as a
+          -- 3-field http-response on the 401/403 path).
           TApp t _   -> extractDataName t
           TCon tc    -> Just (typeConName tc)
           _          -> Nothing
