@@ -276,8 +276,14 @@ static inline kk_decl_pure kk_ssize_t kk_block_scan_fsize(const kk_block_t* b) {
 
 static inline void kk_block_set_invalid(kk_block_t* b) {
 #ifdef KK_DEBUG_FULL
+  // note: for large blocks kk_block_scan_fsize already counts the
+  // `large_scan_fsize` field itself, so the block size is uniformly
+  // sizeof(kk_block_t) + scan_fsize*sizeof(kk_box_t); adding
+  // sizeof(kk_block_large_t) would double-count that field and memset
+  // 8 bytes past the allocation (tripping mimalloc's MI_DEBUG padding
+  // canary on every large-block free).
   const kk_ssize_t scan_fsize = kk_block_scan_fsize(b);
-  const kk_ssize_t bsize = (sizeof(kk_box_t) * scan_fsize) + (b->header.scan_fsize == KK_SCAN_FSIZE_MAX ? sizeof(kk_block_large_t) : sizeof(kk_block_t));
+  const kk_ssize_t bsize = (sizeof(kk_box_t) * scan_fsize) + sizeof(kk_block_t);
   uint8_t* p = (uint8_t*)b;
   for (kk_ssize_t i = 0; i < bsize; i++) {
     p[i] = 0xDF;
@@ -659,8 +665,20 @@ static inline kk_block_t* kk_block_alloc_at(kk_reuse_t at, kk_ssize_t size, kk_s
     b = (kk_block_t*)kk_malloc_small(size, ctx);
   }
   else {
-    kk_assert_internal(kk_block_is_unique(at) || kk_block_field_idx(at) == KK_FIELD_IDX_LAZY_BLOCKED); // TODO: check usable size of `at`
-    b = at;
+    kk_assert_internal(kk_block_is_unique(at) || kk_block_field_idx(at) == KK_FIELD_IDX_LAZY_BLOCKED);
+    // Defense in depth: the reuse donor must be at least as large as the block
+    // we are about to construct. A miscompile that pairs a drop with a larger
+    // allocation (e.g. reusing a closure block as a bigger constructor) would
+    // otherwise write past the donor and silently corrupt the heap, surfacing
+    // much later at an unrelated allocation. Fall back to a fresh allocation
+    // instead of corrupting; this is a cheap branch on the (cold) reuse path.
+    if kk_unlikely(kk_malloc_usable_size((void*)at) < (size_t)size) {
+      kk_free(at, ctx);
+      b = (kk_block_t*)kk_malloc_small(size, ctx);
+    }
+    else {
+      b = at;
+    }
   }
   kk_block_init(b, size, scan_fsize, cpath, tag);
   return b;
