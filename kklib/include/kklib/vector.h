@@ -94,6 +94,12 @@ static inline kk_ssize_t kk_vector_len(const kk_vector_t v, kk_context_t* ctx) {
   return len;
 }
 
+// Return the element at index `i` as an *owned* box (the element is kk_box_dup'd).
+// The `_borrow` refers to the VECTOR `v` (which is borrowed / not dropped), NOT to the result.
+// This matches the koka `unsafe-idx(^v, i) : a` contract: borrowed vector in, owned element out,
+// and the compiler drops the owned result at the use site. Callers in hand-written C MUST drop
+// the returned box themselves; if you only need a transient borrow, index kk_vector_buf_borrow()
+// directly instead (no dup, no drop) — see kk_bytes_join_with / kk_string_from_chars.
 static inline kk_box_t kk_vector_at_borrow(const kk_vector_t v, kk_ssize_t i, kk_context_t* ctx) {
   kk_assert(i < kk_vector_len_borrow(v,ctx));
   kk_box_t res = kk_box_dup(kk_vector_buf_borrow(v, NULL, ctx)[i],ctx);

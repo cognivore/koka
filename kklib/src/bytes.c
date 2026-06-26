@@ -427,13 +427,18 @@ kk_bytes_t  kk_bytes_join_with(kk_vector_t v, kk_bytes_t sep, kk_context_t* ctx)
   kk_ssize_t  copied = 0;
   kk_ssize_t  seplen;
   const char* sepbuf = kk_bytes_cbuf_borrow(sep, &seplen, ctx); 
-  kk_ssize_t  n = kk_vector_len_borrow(v, ctx);
+  kk_ssize_t  n;
+  // NOTE: read elements through the borrowed buffer; do NOT use kk_vector_at_borrow here:
+  // despite its name it kk_box_dup's the element and returns an *owned* box, so using it in
+  // this hand-written loop (and never dropping) leaks every element. The vector owns each
+  // element and kk_vector_drop(v) below releases them.
+  const kk_box_t* vbuf = kk_vector_buf_borrow(v, &n, ctx);
   if (n <= 0) goto end;
 
   // find total required length
   // TODO: check totallen overflow
   for (kk_ssize_t i = 0; i < n; i++) {
-    kk_bytes_t elem = kk_bytes_unbox(kk_vector_at_borrow(v, i, ctx));
+    kk_bytes_t elem = kk_bytes_unbox(vbuf[i]);  // borrowed
     totallen += kk_bytes_len_borrow(elem, ctx);
   }
   totallen += (n - 1) * kk_bytes_len_borrow(sep, ctx);
@@ -442,7 +447,7 @@ kk_bytes_t  kk_bytes_join_with(kk_vector_t v, kk_bytes_t sep, kk_context_t* ctx)
   char* resbuf;
   res = kk_bytes_alloc_cbuf(totallen, &resbuf, ctx);
   for (kk_ssize_t i = 0; i < n; i++) {
-    kk_bytes_t elem = kk_bytes_unbox(kk_vector_at_borrow(v, i, ctx));
+    kk_bytes_t elem = kk_bytes_unbox(vbuf[i]);  // borrowed
     kk_ssize_t len;
     const char* cbuf = kk_bytes_cbuf_borrow(elem, &len, ctx);
     kk_memcpy(resbuf + copied, cbuf, len);
